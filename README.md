@@ -37,7 +37,7 @@ It has the following features:
 * case expressions
 * let expressions
 * tuples
-* list syntax (for stuff like `[x..y]` you unfortunately need to write `[x .. y]`, as the parsers support for `Double` literals is simple)
+* list syntax
 * list comprehensions
 * arithmetic and comparison operators, the prelude exports the ones for `Int`, but for the other types you need to do a qulified import (e.g for `Double` and for `Word`).
 * qualified `do` notation, e.g., `IO.do`
@@ -82,7 +82,7 @@ There are a number of libraries that have some of the standard Haskell functions
 But in general, the `Prelude` contains much, much less.
 
 ## Types
-There are some primitive data types, e.g `Int`, `Handle`, and `Double`.  These are known by the runtime system and various primitive operations work on them.  The function type, `->`, is (of course) also built in. The support for rendering (printing) `Double`s is a bit primitive, and only at most 6 decimal places will be shown. The actual value can contain more precise values, however.
+There are some primitive data types, e.g `Int`, `Handle`, and `Double`.  These are known by the runtime system and various primitive operations work on them.  The function type, `->`, is (of course) also built in.
 
 All other types are defined with the language.  They are converted to lambda terms using
 the Scott encoding.   The runtime system knows how lists are encoded and booleans are encoded.

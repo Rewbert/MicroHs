@@ -558,12 +558,13 @@ init_nodes(void)
   /* The representation of the constructors of
    *  data Ordering = LT | EQ | GT
    * do not have single constructors.
-   * But we can make compound one, since that are irreducible.
+   * But we can make compound one, since they are irreducible.
    */
 #define NEWAP(c, f, a) do { NODEPTR n = HEAPREF(heap_start++); SETTAG(n, T_AP); FUN(n) = (f); ARG(n) = (a); (c) = n;} while(0)
   NEWAP(combLT, combBK,    combFalse);  /* BK B */
   NEWAP(combEQ, combFalse, combFalse);  /* K K */
   NEWAP(combGT, combFalse, combTrue);   /* K A */
+#undef NEWAP
 
 #if INTTABLE
   /* Allocate permanent Int nodes */
@@ -768,6 +769,21 @@ gobble(BFILE *f, int c)
   }
 }
 
+/* Get a non-terminating character.  ' ' and ')' terminate a token. */
+int
+getNT(BFILE *f)
+{
+  int c;
+  
+  c = getb(f);
+  if (c == ' ' || c == ')') {
+    ungetb(c, f);
+    return 0;
+  } else {
+    return c;
+  }
+}
+
 value_t
 parse_int(BFILE *f)
 {
@@ -790,21 +806,11 @@ parse_double(BFILE *f)
   // apparently longest float, when rendered, takes up 24 characters. We add one more for a potential
   // minus sign, and another one for the final null terminator.
   // https://stackoverflow.com/questions/1701055/what-is-the-maximum-length-in-chars-needed-to-represent-any-double-value
-  // I expect Lennart will hate this...
-  char floatstr[26];
-  int i = 0;
-  for(;;) {
-    int c = getb(f);
-    if ((c != '-' && c != '.') && (c < '0' || c > '9')) {
-      ungetb(c, f);
-      break;
-    }
-    floatstr[i++] = c;
-  }
+  char buf[26];
+  for(int j = 0; (buf[j] = getNT(f)); j++)
+    ;
 
-  floatstr[i++] = '\0';
-  double d = strtod(floatstr, NULL);
-  return d;
+  return strtod(buf, NULL);;
 }
 
 NODEPTR
@@ -891,15 +897,8 @@ parse(BFILE *f)
     return r;
   case '$':
     /* A primitive, keep getting char's until end */
-    for (int j = 0;;) {
-      c = getb(f);
-      if (c == ' ' || c == ')') {
-        ungetb(c, f);
-        buf[j] = 0;
-        break;
-      }
-      buf[j++] = c;
-    }
+    for (int j = 0; (buf[j] = getNT(f)); j++)
+      ;
     /* Look up the primop and use the preallocated node. */
     for (int j = 0; j < sizeof primops / sizeof primops[0]; j++) {
       if (strcmp(primops[j].name, buf) == 0) {
@@ -961,15 +960,8 @@ parse(BFILE *f)
     }
   case '#':
     /* An FFI name */
-    for (int j = 0;;) {
-      c = getb(f);
-      if (c == ' ' || c == ')') {
-        ungetb(c, f);
-        buf[j] = 0;
-        break;
-      }
-      buf[j++] = c;
-    }
+    for (int j = 0; (buf[j] = getNT(f)); j++)
+      ;
     r = alloc_node(T_IO_CCALL);
     SETVALUE(r, lookupFFIname(buf));
     return r;
@@ -1626,6 +1618,9 @@ eval(NODEPTR n)
     case T_QUOT: ARITHBIN(/);
     case T_REM:  ARITHBIN(%);
     case T_SUBR: OPINT2(r = yi - xi); SETINT(n, r); RET;
+    case T_UQUOT: ARITHBINU(/);
+    case T_UREM:  ARITHBINU(%);
+
     case T_FADD: FARITHBIN(+);
     case T_FSUB: FARITHBIN(-);
     case T_FMUL: FARITHBIN(*);
@@ -1650,25 +1645,17 @@ eval(NODEPTR n)
     case T_FSHOW:
       // check that the double exists
       CHECK(1);
-
       // evaluate it
       xd = evaldouble(ARG(TOP(0)));
-
       // turn it into a string
-      char str[25];
-      int idx = snprintf(str, 25, "%f", xd);
-
-      /* C will render floats with potentially many training zeros, shave the
-      off by moving the NULL terminator */
-      for(int i = idx - 1; i >= 0; i--) {
-        if(str[i] == '.') {
-          str[i+2] = '\0'; // number is x.0, create {x, '.', '0', '\0'}
-          break;
-        }
-        if(str[i] != '0') {
-          str[i+1] = '\0';
-          break;
-        }
+      char str[30];
+      /* Using 16 decimals will lose some precision.
+       * 17 would keep the precision, but it frequently looks very ugly.
+       */
+      (void)snprintf(str, 25, "%.16g", xd);
+      if (!strchr(str, '.') && !strchr(str, 'e') && !strchr(str, 'E')) {
+        /* There is no decimal point and no exponent, so add a decimal point */
+        strcat(str, ".0");
       }
 
       // turn it into a mhs string
@@ -1677,11 +1664,8 @@ eval(NODEPTR n)
       // remove the double from the stack
       POP(1);
       n = TOP(-1);
-
       // update n to be s
       GOIND(s);
-    case T_UQUOT: ARITHBINU(/);
-    case T_UREM:  ARITHBINU(%);
 
     case T_EQ:   CMP(==);
     case T_NE:   CMP(!=);
