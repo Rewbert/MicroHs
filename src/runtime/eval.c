@@ -9,26 +9,13 @@
 #include <ctype.h>
 #include <setjmp.h>
 
-#define GCRED    1              /* do some reductions during GC */
-#define FASTTAGS 1              /* compute tag by pointer subtraction */
-#define UNIONPTR 1              /* use compact (2 pointer) layout */
-#define INTTABLE 1              /* use fixed table of small INT nodes */
-#define SANITY   1              /* do some sanity checks */
-#define STACKOVL 1              /* check for stack overflow */
-#define GETRAW   1              /* implement raw character get */
-
-typedef intptr_t value_t;       /* Make value the same size as pointers, since they are in a union */
-#define PRIvalue PRIdPTR
-typedef uintptr_t uvalue_t;     /* Make unsigned value the same size as pointers, since they are in a union */
-#define PRIuvalue PRIuPTR
-typedef uintptr_t heapoffs_t;   /* Heap offsets */
-#define PRIheap PRIuPTR
-typedef uintptr_t tag_t;        /* Room for tag, low order bit indicates AP/not-AP */
-typedef intptr_t stackptr_t;    /* Index into stack */
-/* These types can be changed for 32 bit platforms. */
-typedef uint64_t counter_t;     /* Statistics counter, can be smaller since overflow doesn't matter */
-#define PRIcounter PRIu64
-typedef uint64_t bits_t;        /* One word of bits */
+#include "config.h"
+#include "combinators.h"
+#include "node.h"
+#include "bfile.h"
+#include "parse.h"
+#include "err.h"
+#include "gc.h"
 
 /* We cast all FFI functions to this type.  It's reasonably portable */
 typedef void (*funptr_t)(void);
@@ -135,113 +122,6 @@ getraw()
 
 /***************************************/
 
-#define VERSION "v3.5\n"
-
-/* Keep permanent nodes for LOW_INT <= i < HIGH_INT */
-#define LOW_INT (-10)
-#define HIGH_INT 128
-
-#define HEAP_CELLS 50000000
-#define STACK_SIZE 100000
-
-#define ERR(s) do { fprintf(stderr, "ERR: %s\n", s); exit(1); } while(0)
-
-enum node_tag { T_FREE, T_IND, T_AP, T_INT, T_DOUBLE, T_HDL, T_S, T_K, T_I, T_B, T_C,
-                T_A, T_Y, T_SS, T_BB, T_CC, T_P, T_O, T_T, T_BK, T_ADD, T_SUB, T_MUL,
-                T_QUOT, T_REM, T_SUBR, T_UQUOT, T_UREM,
-                T_FADD, T_FSUB, T_FMUL, T_FDIV,
-                T_FEQ, T_FNE, T_FLT, T_FLE, T_FGT, T_FGE, T_FSHOW, T_FREAD,
-                T_EQ, T_NE, T_LT, T_LE, T_GT, T_GE, T_ULT, T_ULE, T_UGT, T_UGE,
-                T_ERROR, T_SEQ, T_EQUAL, T_COMPARE, T_RNF,
-                T_IO_BIND, T_IO_THEN, T_IO_RETURN, T_IO_GETCHAR, T_IO_PUTCHAR,
-                T_IO_SERIALIZE, T_IO_DESERIALIZE, T_IO_OPEN, T_IO_CLOSE, T_IO_ISNULLHANDLE,
-                T_IO_STDIN, T_IO_STDOUT, T_IO_STDERR, T_IO_GETARGS, T_IO_DROPARGS,
-                T_IO_PERFORMIO,
-                T_IO_GETTIMEMILLI, T_IO_PRINT, T_IO_CATCH,
-                T_IO_CCALL, T_IO_GETRAW, T_IO_FLUSH,
-                T_STR,
-                T_ISINT, T_ISIO,
-                T_LAST_TAG,
-};
-
-#if NAIVE
-
-/* Naive node representation with minimal unions */
-typedef struct node {
-  enum node_tag tag;
-  union {
-    value_t value;
-    double doublevalue;
-    FILE *file;
-    const char *string;
-    struct {
-      struct node *fun;
-      struct node *arg;
-    } s;
-  } u;
-} node;
-typedef struct node* NODEPTR;
-#define NIL 0
-#define HEAPREF(i) &cells[(i)]
-#define MARK(p) (p)->mark
-#define GETTAG(p) (p)->tag
-#define SETTAG(p, t) do { (p)->tag = (t); } while(0)
-#define GETVALUE(p) (p)->u.value
-// to squeeze a double into value_t we must exactly copy and read the bits
-// this is a stm, and not an exp
-#define GETDOUBLEVALUE(p) (p)->u.doublevalue
-#define SETVALUE(p,v) (p)->u.value = v
-#define SETDOUBLEVALUE(p,v) (p)->u.doublevalue = v
-#define FUN(p) (p)->u.s.fun
-#define ARG(p) (p)->u.s.arg
-#define NEXT(p) FUN(p)
-#define INDIR(p) FUN(p)
-#define HANDLE(p) (p)->u.file
-#define NODE_SIZE sizeof(node)
-#define ALLOC_HEAP(n) do { cells = malloc(n * sizeof(node)); if (!cells) memerr(); memset(cells, 0x55, n * sizeof(node)); } while(0)
-#define LABEL(n) ((heapoffs_t)((n) - cells))
-node *cells;                 /* All cells */
-
-#elif UNIONPTR
-
-typedef struct node {
-  union {
-    struct node *uufun;
-    tag_t uutag;             /* LSB=1 indicates that this is a tag, LSB=0 that this is a T_AP node */
-  } ufun;
-  union {
-    struct node *uuarg;
-    value_t uuvalue;
-    double uudoublevalue;
-    FILE *uufile;
-    const char *uustring;
-  } uarg;
-} node;
-typedef struct node* NODEPTR;
-#define NIL 0
-#define HEAPREF(i) &cells[(i)]
-#define GETTAG(p) ((p)->ufun.uutag & 1 ? (int)((p)->ufun.uutag >> 1) : T_AP)
-#define SETTAG(p,t) do { if (t != T_AP) (p)->ufun.uutag = ((t) << 1) + 1; } while(0)
-#define GETVALUE(p) (p)->uarg.uuvalue
-#define GETDOUBLEVALUE(p) (p)->uarg.uudoublevalue
-#define SETVALUE(p,v) (p)->uarg.uuvalue = v
-#define SETDOUBLEVALUE(p,v) (p)->uarg.uudoublevalue = v
-#define FUN(p) (p)->ufun.uufun
-#define ARG(p) (p)->uarg.uuarg
-#define STR(p) (p)->uarg.uustring
-#define INDIR(p) ARG(p)
-#define HANDLE(p) (p)->uarg.uufile
-#define NODE_SIZE sizeof(node)
-#define ALLOC_HEAP(n) do { cells = malloc(n * sizeof(node)); memset(cells, 0x55, n * sizeof(node)); } while(0)
-#define LABEL(n) ((heapoffs_t)((n) - cells))
-node *cells;                 /* All cells */
-
-#else
-
-#error "pick a node type"
-
-#endif
-
 counter_t num_reductions = 0;
 counter_t num_alloc;
 counter_t num_gc = 0;
@@ -267,16 +147,9 @@ counter_t num_marked;
 counter_t max_num_marked = 0;
 counter_t num_free;
 
-#define BITS_PER_WORD (sizeof(bits_t) * 8)
 bits_t *free_map;             /* 1 bit per node, 0=free, 1=used */
 heapoffs_t free_map_nwords;
 heapoffs_t next_scan_index;
-
-typedef struct {
-  size_t   b_size;
-  size_t   b_pos;
-  uint8_t  b_buffer[1];
-} BFILE;
 
 struct handler {
   jmp_buf         hdl_buf;      /* env storage */
@@ -284,71 +157,6 @@ struct handler {
   stackptr_t      hdl_stack;    /* old stack pointer */
   NODEPTR         hdl_exn;     /* used temporarily to pass the exception value */
 } *cur_handler = 0;
-
-void
-memerr(void)
-{
-  fprintf(stderr, "Out of memory\n");
-  exit(1);
-}
-
-BFILE *
-alloc_buffer(size_t size)
-{
-  BFILE *p;
-  p = malloc(sizeof(BFILE) + size);
-  if (!p)
-    memerr();
-  p->b_size = size;
-  p->b_pos = 0;
-  return p;
-}
-
-int
-getb(BFILE *p)
-{
-  if (p->b_pos >= p->b_size)
-    return -1;
-  return p->b_buffer[p->b_pos++];
-}
-
-void
-ungetb(int c, BFILE *p)
-{
-  if (p->b_pos == 0)
-    ERR("ungetb");
-  p->b_buffer[--p->b_pos] = (uint8_t)c;
-}
-
-/* Set FREE bit to 0 */
-static inline void mark_used(NODEPTR n)
-{
-  heapoffs_t i = LABEL(n);
-  if (i < heap_start)
-    return;
-#if SANITY
-  if (i >= free_map_nwords * BITS_PER_WORD) ERR("mark_used");
-#endif
-  free_map[i / BITS_PER_WORD] &= ~(1ULL << (i % BITS_PER_WORD));
-}
-
-/* Test if FREE bit is 0 */
-static inline int is_marked_used(NODEPTR n)
-{
-  heapoffs_t i = LABEL(n);
-  if (i < heap_start)
-    return 1;
-#if SANITY
-  if (i >= free_map_nwords * BITS_PER_WORD) ERR("is_marked_used");;
-#endif
-  return (free_map[i / BITS_PER_WORD] & (1ULL << (i % BITS_PER_WORD))) == 0;
-}
-
-static inline void mark_all_free(void)
-{
-  memset(free_map, ~0, free_map_nwords * sizeof(bits_t));
-  next_scan_index = heap_start;
-}
 
 int glob_argc;
 char **glob_argv;
@@ -588,101 +396,6 @@ init_nodes(void)
 int red_a, red_k, red_i, red_int;
 #endif
 
-//counter_t mark_depth;
-
-/* Mark all used nodes reachable from *np */
-void
-mark(NODEPTR *np)
-{
-  NODEPTR n;
-#if GCRED
-  value_t i;
-#endif
-
-  //  mark_depth++;
-  //  if (mark_depth % 10000 == 0)
-  //    printf("mark depth %"PRIcounter"\n", mark_depth);
-  top:
-  n = *np;
-  if (GETTAG(n) == T_IND) {
-#if SANITY
-    int loop = 0;
-    /* Skip indirections, and redirect start pointer */
-    while (GETTAG(n) == T_IND) {
-      //      printf("*"); fflush(stdout);
-      n = INDIR(n);
-      if (loop++ > 10000000) {
-        printf("%p %p %p\n", n, INDIR(n), INDIR(INDIR(n)));
-        ERR("IND loop");
-      }
-    }
-    //    if (loop)
-    //      printf("\n");
-#else  /* SANITY */
-    while (GETTAG(n) == T_IND) {
-      n = INDIR(n);
-    }
-#endif  /* SANITY */
-    *np = n;
-  }
-  if (is_marked_used(n)) {
-    //    mark_depth--;
-    return;
-  }
-  num_marked++;
-  mark_used(n);
-#if GCRED
-  /* This is really only fruitful just after parsing.  It can be removed. */
-  if (GETTAG(n) == T_AP && GETTAG(FUN(n)) == T_AP && GETTAG(FUN(FUN(n))) == T_A) {
-    /* Do the A x y --> y reduction */
-    NODEPTR y = ARG(n);
-    SETTAG(n, T_IND);
-    INDIR(n) = y;
-    red_a++;
-    goto top;
-  }
-#if 0
-  /* This never seems to happen */
-  if (GETTAG(n) == T_AP && GETTAG(FUN(n)) == T_AP && GETTAG(FUN(FUN(n))) == T_K) {
-    /* Do the K x y --> x reduction */
-    NODEPTR x = ARG(FUN(n));
-    SETTAG(n, T_IND);
-    INDIR(n) = x;
-    red_k++;
-    goto top;
-  }
-#endif
-  if (GETTAG(n) == T_AP && GETTAG(FUN(n)) == T_I) {
-    /* Do the I x --> x reduction */
-    NODEPTR x = ARG(n);
-    SETTAG(n, T_IND);
-    INDIR(n) = x;
-    red_i++;
-    goto top;
-  }
-#if INTTABLE
-  if (GETTAG(n) == T_INT && LOW_INT <= (i = GETVALUE(n)) && i < HIGH_INT) {
-    SETTAG(n, T_IND);
-    INDIR(n) = intTable[i - LOW_INT];
-    red_int++;
-    goto top;
-  }
-#endif  /* INTTABLE */
-#endif  /* GCRED */
-  if (GETTAG(n) == T_AP) {
-#if 1
-    mark(&FUN(n));
-    //mark(&ARG(n));
-    np = &ARG(n);
-    goto top;                   /* Avoid tail recursion */
-#else
-    mark(&ARG(n));
-    np = &FUN(n);
-    goto top;                   /* Avoid tail recursion */
-#endif
-  }
-}
-
 /* Perform a garbage collection:
    - First mark from all roots; roots are on the stack.
 */
@@ -754,63 +467,6 @@ lookupFFIname(const char *name)
     if (strcmp(ffi_table[i].ffi_name, name) == 0)
       return (value_t)i;
   ERR("lookupFFIname");
-}
-
-/* If the next input character is c, then consume it, else leave it alone. */
-int
-gobble(BFILE *f, int c)
-{
-  int d = getb(f);
-  if (c == d) {
-    return 1;
-  } else {
-    ungetb(d, f);
-    return 0;
-  }
-}
-
-/* Get a non-terminating character.  ' ' and ')' terminate a token. */
-int
-getNT(BFILE *f)
-{
-  int c;
-  
-  c = getb(f);
-  if (c == ' ' || c == ')') {
-    ungetb(c, f);
-    return 0;
-  } else {
-    return c;
-  }
-}
-
-value_t
-parse_int(BFILE *f)
-{
-  value_t i = 0;
-  int c = getb(f);
-  for(;;) {
-    i = i * 10 + c - '0';
-    c = getb(f);
-    if (c < '0' || c > '9') {
-      ungetb(c, f);
-      break;
-    }
-  }
-  return i;
-}
-
-double
-parse_double(BFILE *f)
-{
-  // apparently longest float, when rendered, takes up 24 characters. We add one more for a potential
-  // minus sign, and another one for the final null terminator.
-  // https://stackoverflow.com/questions/1701055/what-is-the-maximum-length-in-chars-needed-to-represent-any-double-value
-  char buf[26];
-  for(int j = 0; (buf[j] = getNT(f)); j++)
-    ;
-
-  return strtod(buf, NULL);;
 }
 
 NODEPTR
@@ -1018,8 +674,11 @@ parse_FILE(FILE *f)
 
   /* Read entire file */
   BFILE *b = alloc_buffer(size);
-  if (fread(b->b_buffer, 1, size, f) != size)
+  if(read_into_buffer(b, size, f) != size) {
     ERR("fread");
+  }
+  // if (fread(b->b_buffer, 1, size, f) != size)
+  //   ERR("fread");
 
   /* And parse it */
   NODEPTR n = parse_top(b);

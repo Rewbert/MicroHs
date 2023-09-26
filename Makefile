@@ -16,6 +16,8 @@ ALLSRC=src/*/*.hs lib/*.hs lib/*/*.hs ghc/*.hs ghc/*/*.hs
 MHS=mhs
 COMB=comb/
 EVAL=$(BIN)/eval
+EVALSRC=src/runtime
+EVALINC=include
 .PHONY: all alltest everytest runtest bootboottest bootcombtest $(MHS)test test alltest time example bootstraptest
 
 all:	$(EVAL) $(BIN)/$(MHS)
@@ -26,9 +28,9 @@ everytest:	runtest example examplecomb bootboottest bootcombtest
 ### Build evaluator (runtime system)
 ###
 # On MINGW you might need the additional flags -Wl,--stack,50000000 to increase stack space.
-$(EVAL):	src/runtime/eval.c
+$(EVAL):	$(EVALSRC)/*.c $(EVALINC)/*.h
 	@mkdir -p bin
-	$(GCC) -Wall -O3 src/runtime/eval.c -o $(EVAL)
+	$(GCC) -Wall -O3 -I$(EVALINC) $(EVALSRC)/node.c $(EVALSRC)/err.c $(EVALSRC)/parse.c $(EVALSRC)/bfile.c $(EVALSRC)/gc.c $(EVALSRC)/eval.c -o $(EVAL)
 
 ###
 ### Build the compiler with ghc, using standard libraries (Prelude, Data.List, etc)
