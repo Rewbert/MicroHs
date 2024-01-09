@@ -47,6 +47,10 @@ typedef void (*funptr_t)(void);
 #define MALLOC malloc
 #endif
 
+#if !defined(REALLOC)
+#define REALLOC realloc
+#endif
+
 #if !defined(FREE)
 #define FREE free
 #endif
@@ -215,7 +219,7 @@ typedef struct node* NODEPTR;
 #define ARR(p) (p)->uarg.uuarray
 #define INDIR(p) ARG(p)
 #define NODE_SIZE sizeof(node)
-#define ALLOC_HEAP(n) do { cells = MALLOC(n * sizeof(node)); memset(cells, 0x55, n * sizeof(node)); } while(0)
+#define ALLOC_HEAP(n) do { cells = MALLOC(n * sizeof(node)); if(cells == NULL) { PRINT("ALLOC_HEAP failed\r\n"); } memset(cells, 0x55, n * sizeof(node)); } while(0)
 #define LABEL(n) ((heapoffs_t)((n) - cells))
 node *cells;                 /* All cells */
 
@@ -325,7 +329,7 @@ add_tick_table(const char *name)
   }
   if (tick_index >= tick_table_size) {
     tick_table_size *= 2;
-    tick_table = realloc(tick_table, tick_table_size * sizeof(struct tick_entry));
+    tick_table = REALLOC(tick_table, tick_table_size * sizeof(struct tick_entry));
     if (!tick_table)
       memerr();
   }
@@ -404,10 +408,11 @@ static INLINE NODEPTR
 alloc_node(enum node_tag t)
 {
 #if SANITY
-  if (num_free <= 0)
+  if (num_free <= 0) {
+    PRINT("no free nodes\r\n");
     ERR("alloc_node");
+  }
 #endif
-
   heapoffs_t i = next_scan_index / BITS_PER_WORD;
   int k;                        /* will contain bit pos + 1 */
   for(;;) {
@@ -422,6 +427,7 @@ alloc_node(enum node_tag t)
       fprintf(stderr, "wordsize=%d, num_free=%u next_scan_index=%u i=%u free_map_nwords=%u\n", (int)BITS_PER_WORD,
               (unsigned int)num_free, (unsigned int)next_scan_index, (unsigned int)i, (unsigned int)free_map_nwords);
 #endif
+//      PRINT("alloc_node error free_map. i = %d, free_map_nwords = %d\r\n", i, free_map_nwords);
       ERR("alloc_node: free_map");
     }
 #endif
@@ -434,6 +440,7 @@ alloc_node(enum node_tag t)
   SETTAG(n, t);
   num_alloc++;
   num_free--;
+  PRINT("free nodes: %d\r\n", num_free);
   return n;
 }
 
@@ -668,7 +675,6 @@ init_nodes(void)
 
   /* Round up heap_start to the next bitword boundary to avoid the permanent nodes. */
   heap_start = (heap_start + BITS_PER_WORD - 1) / BITS_PER_WORD * BITS_PER_WORD;
-
   mark_all_free();
 
   num_free = heap_size - heap_start;
@@ -1134,7 +1140,7 @@ parse_string(BFILE *f)
       break;
     if (i >= sz) {
       sz *= 2;
-      buffer = realloc(buffer, sz);
+      buffer = REALLOC(buffer, sz);
       if (!buffer)
         memerr();
     }
@@ -1142,14 +1148,47 @@ parse_string(BFILE *f)
       buffer[i++] = (char)parse_int(f);
       if (!gobble(f, '&'))
         ERR("parse string");
+      PRINT("&");
     } else {
       buffer[i++] = c;
     }
   }
   buffer[i++] = 0;
-  return realloc(buffer, i);
+  PRINT("%s\"", buffer);
+  return REALLOC(buffer, i);
 }
 
+NODEPTR
+__attribute__ ((noinline))
+parseFFINode(BFILE *f)
+{
+  char buf[80];
+  /* An FFI name */
+  for (int j = 0; (buf[j] = getNT(f)); j++)
+    ;
+  return ffiNode(buf);
+}
+
+NODEPTR
+__attribute__ ((noinline))
+parsePrimitive(BFILE *f, const char c)
+{
+  char buf[80];
+  buf[0] = c;
+  /* A primitive, keep getting char's until end */
+  for (int j = 1; (buf[j] = getNT(f)); j++)
+    ;
+//  PRINT("blabla%s", buf);
+  /* Look up the primop and use the preallocated node. */
+  for (int j = 0; j < sizeof primops / sizeof primops[0]; j++) {
+    if (strcmp(primops[j].name, buf) == 0) {
+      return primops[j].node;
+    }
+  }
+  ERR1("no primop %s", buf);
+}
+
+// "v6.1\n758\n((A :0 ((B (B (B (B C)))) ((B (B (B C))) ((B (B C))"
 NODEPTR
 parse(BFILE *f)
 {
@@ -1159,18 +1198,26 @@ parse(BFILE *f)
   value_t i;
   flt_t d;
   int c;
-  char buf[80];                 /* store names of primitives. */
+//  char buf[80];                 /* store names of primitives. */
 
   c = getb(f);
+  PRINT("%p %c\r\n", &r, c);
   if (c < 0) ERR("parse EOF");
   switch (c) {
   case '(' :
     /* application: (f a) */
+//    PRINT("before allocation");
     r = alloc_node(T_AP);
+//    PRINT("after allocation");
+//    PRINT("before fun");
     FUN(r) = parse(f);
+//    PRINT("after fun");
     if (!gobble(f, ' ')) ERR("parse ' '");
+    PRINT(" ");
     ARG(r) = parse(f);
+//    PRINT("after arg\r\n");
     if (!gobble(f, ')')) ERR("parse ')'");
+    PRINT(")");
     return r;
   case '&':
     d = parse_double(f);
@@ -1184,9 +1231,11 @@ parse(BFILE *f)
     {
       size_t sz = (size_t)parse_int(f);
       if (!gobble(f, ']')) ERR("parse arr 1");
+      PRINT("]");
       struct ioarray *arr = arr_alloc(sz, NIL);
       for (size_t i = 0; i < sz; i++) {
         if (!gobble(f, ' ')) ERR("parse arr 2");
+        PRINT(" ");
         arr->array[i] = parse(f);
       }
       r = alloc_node(T_ARR);
@@ -1196,6 +1245,7 @@ parse(BFILE *f)
   case '_' :
     /* Reference to a shared value: _label */
     l = parse_int(f);  /* The label */
+    PRINT("%d", l);
     nodep = find_label(l);
     if (*nodep == NIL) {
       /* Not yet defined, so make it an indirection */
@@ -1206,7 +1256,10 @@ parse(BFILE *f)
   case ':' :
     /* Define a shared expression: :label e */
     l = parse_int(f);  /* The label */
+    PRINT("%d", l);
     if (!gobble(f, ' ')) ERR("parse ' '");
+    PRINT(" ");
+//    PRINT("label: %d\r\n", l);
     nodep = find_label(l);
     if (*nodep == NIL) {
       /* not referenced yet, so create a node */
@@ -1228,28 +1281,13 @@ parse(BFILE *f)
   case '!':
     if (!gobble(f, '"'))
       ERR("parse !");
+    PRINT("\"");
     i = add_tick_table(parse_string(f));
     r = alloc_node(T_TICK);
     SETVALUE(r, (value_t)i);
     return r;
-  case '^':
-    /* An FFI name */
-    for (int j = 0; (buf[j] = getNT(f)); j++)
-      ;
-    r = ffiNode(buf);
-    return r;
-  default:
-    buf[0] = c;
-    /* A primitive, keep getting char's until end */
-    for (int j = 1; (buf[j] = getNT(f)); j++)
-      ;
-    /* Look up the primop and use the preallocated node. */
-    for (int j = 0; j < sizeof primops / sizeof primops[0]; j++) {
-      if (strcmp(primops[j].name, buf) == 0) {
-        return primops[j].node;
-      }
-    }
-    ERR1("no primop %s", buf);
+  case '^': return parseFFINode(f);
+  default: return parsePrimitive(f, c);
   }
 }
 
@@ -1281,6 +1319,7 @@ parse_top(BFILE *f)
     memerr();
   for(heapoffs_t i = 0; i < shared_table_size; i++)
     shared_table[i].node = NIL;
+  PRINT("parse_top:beginning to parse\r\n");
   NODEPTR n = parse(f);
   FREE(shared_table);
   return n;
@@ -1752,7 +1791,7 @@ evalstring(NODEPTR n, value_t *lenp)
   for (offs = 0;;) {
     if (offs >= sz - 1) {
       sz *= 2;
-      name = realloc(name, sz);
+      name = REALLOC(name, sz);
       if (!name)
         memerr();
     }
@@ -2611,34 +2650,36 @@ main(int argc, char **argv)
 
   argc--, argv++;
   glob_argv = argv;
-  for (av = argv, inrts = 0; argc--; argv++) {
-    char *p = *argv;
-    if (inrts) {
-      if (strcmp(p, "-RTS") == 0) {
-        inrts = 0;
-      } else {
-        if (strcmp(p, "-v") == 0)
-          verbose++;
-        else if (strcmp(p, "-T") == 0)
-          dump_ticks = 1;
-        else if (strncmp(p, "-H", 2) == 0)
-          heap_size = memsize(&p[2]);
-        else if (strncmp(p, "-K", 2) == 0)
-          stack_size = memsize(&p[2]);
-        else if (strncmp(p, "-r", 2) == 0)
-          inname = &p[2];
+  if(argc >= 0) {
+    for (av = argv, inrts = 0; argc--; argv++) {
+      char *p = *argv;
+      if (inrts) {
+        if (strcmp(p, "-RTS") == 0) {
+          inrts = 0;
+        } else {
+          if (strcmp(p, "-v") == 0)
+            verbose++;
+          else if (strcmp(p, "-T") == 0)
+            dump_ticks = 1;
+          else if (strncmp(p, "-H", 2) == 0)
+            heap_size = memsize(&p[2]);
+          else if (strncmp(p, "-K", 2) == 0)
+            stack_size = memsize(&p[2]);
+          else if (strncmp(p, "-r", 2) == 0)
+            inname = &p[2];
 #if WANT_STDIO
-        else if (strncmp(p, "-o", 2) == 0)
-          outname = &p[2];
+          else if (strncmp(p, "-o", 2) == 0)
+            outname = &p[2];
 #endif  /* WANT_STDIO */
-        else
-          ERR("Usage: eval [+RTS [-v] [-Hheap-size] [-Kstack-size] [-rFILE] [-oFILE] -RTS] arg ...");
-      }
-    } else {
-      if (strcmp(p, "+RTS") == 0) {
-        inrts = 1;
+          else
+            ERR("Usage: eval [+RTS [-v] [-Hheap-size] [-Kstack-size] [-rFILE] [-oFILE] -RTS] arg ...");
+        }
       } else {
-        *av++ = p;
+        if (strcmp(p, "+RTS") == 0) {
+          inrts = 1;
+        } else {
+          *av++ = p;
+        }
       }
     }
   }
@@ -2647,25 +2688,34 @@ main(int argc, char **argv)
   if (inname == 0)
     inname = "out.comb";
 
+  PRINT("before init nodes\r\n");
   init_nodes();
+  PRINT("after init nodes\r\n");
   stack = MALLOC(sizeof(NODEPTR) * stack_size);
   if (!stack)
     memerr();
 
   if (combexpr) {
+    PRINT("inside combexpr\r\n");
     int c;
     BFILE *bf = openb_buf(combexpr, combexprlen);
+    PRINT("buffer opened\r\n");
     c = getb(bf);
     /* Compressed combinators start with a 'Z', otherwise 'v' (for version) */
     if (c == 'Z') {
+      PRINT("file is compressed\r\n");
       /* add compressor transducer */
       bf = add_lzw_decompressor(bf);
     } else {
+      PRINT("file is not compressed\r\n");
       /* put it back, we need it */
       ungetb(c, bf);
     }
+    PRINT("beginning to parse program...\r\n");
     prog = parse_top(bf);
+    PRINT("program parsed\r\n");
     closeb(bf);
+    PRINT("end of combexpr\r\n");
   } else {
 #if WANT_STDIO
     prog = parse_file(inname, &file_size);
