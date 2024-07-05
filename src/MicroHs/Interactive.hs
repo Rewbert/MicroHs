@@ -15,7 +15,7 @@ import MicroHs.SymTab(Entry(..), stEmpty, stKeysGlbU)
 import MicroHs.Translate
 import MicroHs.TypeCheck(ValueExport(..), TypeExport(..), TModule(..), Symbols)
 import Unsafe.Coerce
-import System.Console.SimpleReadline
+--import System.Console.SimpleReadline ( getInputLineHistComp )
 import MicroHs.Instances(compiledWithGHC)
 
 data IState = IState {
@@ -55,7 +55,7 @@ start = do
 repl :: I ()
 repl = do
   syms <- gets isSymbols
-  ms <- liftIO $ getInputLineHistComp (return . complete syms) ".mhsi" "> "
+  ms <- return Nothing -- liftIO $ getInputLineHistComp (return . complete syms) ".mhsi" "> "
   case ms of
     Nothing -> repl
     Just s ->
@@ -217,7 +217,7 @@ tryCompile file = do
   res <- liftIO $ try $ compileCacheTop flgs interactiveId cash
   case res of
     Left e -> return (Left e)
-    Right ((_, m), syms, cash') -> do
+    Right ((_, m), syms, cash', _) -> do
       updateCache (const cash')
       setSyms syms
       return (Right m)

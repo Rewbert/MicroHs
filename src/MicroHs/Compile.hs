@@ -37,6 +37,8 @@ import MicroHs.SymTab
 import MicroHs.TypeCheck
 import Compat
 import MicroHs.Instances() -- for ghc
+import Text.PrettyPrint.HughesPJLite
+import MicroHs.Interface
 
 mhsCacheName :: FilePath
 mhsCacheName = ".mhscache"
@@ -47,9 +49,9 @@ type Time = Int
 
 -- Compile the module with the given name, starting with the given cache.
 -- Return the "compiled module" and the resulting cache.
-compileCacheTop :: Flags -> IdentModule -> Cache -> IO ((IdentModule, [(Ident, Exp)]), Symbols, Cache)
+compileCacheTop :: Flags -> IdentModule -> Cache -> IO ((IdentModule, [(Ident, Exp)]), Symbols, Cache, [TypeExport])
 compileCacheTop flags mn ch = do
-  res@((_, ds), _, _) <- compile flags mn ch
+  res@((_, ds), _, _, te) <- compile flags mn ch
   when (verbosityGT flags 4) $
     putStrLn $ "combinators:\n" ++ showLDefs ds
   return res
@@ -77,7 +79,7 @@ maybeSaveCache flags cash =
     () <- seq (rnfNoErr cash) (return ())
     saveCache mhsCacheName cash
 
-compile :: Flags -> IdentModule -> Cache -> IO ((IdentModule, [LDef]), Symbols, Cache)
+compile :: Flags -> IdentModule -> Cache -> IO ((IdentModule, [LDef]), Symbols, Cache, [TypeExport])
 compile flags nm ach = do
   let comp = do
 --XXX        modify $ addBoot $ mkIdent "Control.Exception.Internal"      -- the compiler generates references to this module
@@ -94,16 +96,16 @@ compile flags nm ach = do
         loadBoots
         loadDependencies flags
         return r
-  ((cm, syms, t), ch) <- runStateIO comp ach
+  ((cm, syms, t, te), ch) <- runStateIO comp ach
   when (verbosityGT flags 0) $
     putStrLn $ "total import time     " ++ padLeft 6 (show t) ++ "ms"
-  return ((tModuleName cm, concatMap bindingsOf $ cachedModules ch), syms, ch)
+  return ((tModuleName cm, concatMap bindingsOf $ cachedModules ch), syms, ch, te)
 
 -- Compile a module with the given name.
 -- If the module has already been compiled, return the cached result.
 -- If the module has not been compiled, first try to find a source file.
 -- If there is no source file, try loading a package.
-compileModuleCached :: Flags -> ImpType -> IdentModule -> StateIO Cache (TModule [LDef], Symbols, Time)
+compileModuleCached :: Flags -> ImpType -> IdentModule -> StateIO Cache (TModule [LDef], Symbols, Time, [TypeExport])
 compileModuleCached flags impt mn = do
   cash <- get
   case lookupCache mn cash of
@@ -122,12 +124,12 @@ compileModuleCached flags impt mn = do
     Just tm -> do
       when (verbosityGT flags 1) $
         liftIO $ putStrLn $ "importing cached " ++ showIdent mn
-      return (tm, noSymbols, 0)
+      return (tm, noSymbols, 0, [])
 
 noSymbols :: Symbols
 noSymbols = (stEmpty, stEmpty)
 
-compileBootModule :: Flags -> IdentModule -> StateIO Cache (TModule [LDef], Symbols, Time)
+compileBootModule :: Flags -> IdentModule -> StateIO Cache (TModule [LDef], Symbols, Time, [TypeExport])
 compileBootModule flags mn = do
   when (verbosityGT flags 0) $
     liftIO $ putStrLn $ "importing boot " ++ showIdent mn
@@ -138,12 +140,13 @@ compileBootModule flags mn = do
       modify $ addBoot mn
       compileModule flags ImpBoot mn pathfn file
 
-compileModule :: Flags -> ImpType -> IdentModule -> FilePath -> String -> StateIO Cache (TModule [LDef], Symbols, Time)
+compileModule :: Flags -> ImpType -> IdentModule -> FilePath -> String -> StateIO Cache (TModule [LDef], Symbols, Time, [TypeExport])
 compileModule flags impt mn pathfn file = do
   t1 <- liftIO getTimeMilli
   mchksum <- liftIO (md5File pathfn)  -- XXX there is a small gap between reading and computing the checksum.
   let chksum :: MD5CheckSum
       chksum = fromMaybe undefined mchksum
+  -- read and parse module
   let pmdl = parseDie pTop pathfn file
       mdl@(EModule mnn _ defs) = addPreludeImport pmdl
   when (verbosityGT flags 4) $
@@ -155,22 +158,31 @@ compileModule flags impt mn pathfn file = do
   when (isNothing (getFileName mn) && mn /= mnn) $
     error $ "module name does not agree with file name: " ++ showIdent mn ++ " " ++ showIdent mnn
   let
+    -- figure out which modules it imports (depends on)
     specs = [ s | Import s <- defs ]
     imported = [ (boot, m) | ImportSpec boot _ m _ _ <- specs ]
+--  liftIO $ putStrLn $ show mn ++ " imports " ++ show (map snd imported)
+--  liftIO $ compileOrReadInterface flags (head (map snd (imported)))
   t2 <- liftIO getTimeMilli
-  (impMdls, _, tImps) <- fmap unzip3 $ mapM (uncurry $ compileModuleCached flags) imported
+  -- recursively compile the modules you depend on
+  (impMdls, _, tImps, _) <- fmap unzip4 $ mapM (uncurry $ compileModuleCached flags) imported
 
   t3 <- liftIO getTimeMilli
   let
+    -- now that all dependencies are taken care of, we typecheck this module
     (tmdl, syms) = typeCheck impt (zip specs impMdls) mdl
+--  liftIO $ putStrLn $ show $ tTypeExports tmdl
+  liftIO $ putStrLn $ "now I typechecked module: " ++ show (tModuleName tmdl)
   when (verbosityGT flags 3) $
     liftIO $ putStrLn $ "type checked:\n" ++ showTModule showEDefs tmdl ++ "-----\n"
   let
+    -- we desugar the module
     dmdl = desugar flags tmdl
   () <- return $ rnf $ bindingsOf dmdl
   t4 <- liftIO getTimeMilli
 
   let
+    -- replace the bindings of the module with the same ones, but after bracket-abstracting them
     cmdl = setBindings [ (i, compileOpt e) | (i, e) <- bindingsOf dmdl ] dmdl
   () <- return $ rnf $ bindingsOf cmdl
   t5 <- liftIO getTimeMilli
@@ -193,7 +205,8 @@ compileModule flags impt mn pathfn file = do
     ImpNormal -> modify $ workToDone (cmdl, map snd imported, chksum)
     ImpBoot   -> return ()
 
-  return (cmdl, syms, tTot + tImp)
+  -- return the module, symbols, and times
+  return (cmdl, syms, tTot + tImp, tTypeExports tmdl)
 
 addPreludeImport :: EModule -> EModule
 addPreludeImport (EModule mn es ds) =
@@ -208,6 +221,15 @@ addPreludeImport (EModule mn es ds) =
             [] -> [Import $ ImportSpec ImpNormal False idPrelude Nothing Nothing]     -- no Prelude imports, so add 'import Prelude'
             [Import (ImportSpec ImpNormal False _ Nothing (Just (False, [])))] -> []  -- exactly 'import Prelude()', so import nothing
             _ -> ps                                                         -- keep the given Prelude imports
+
+compileOrReadInterface :: Flags -> IdentModule -> IO Interface
+compileOrReadInterface flags mn = do
+  mres <- readModulePath flags ".hs" mn
+  case mres of
+    Nothing -> undefined
+    Just (pathfn, file) -> do
+      putStrLn $ "hello, the path is: " ++ pathfn
+  undefined
 
 -------------------------------------------
 
@@ -333,7 +355,7 @@ packageSuffix = ".pkg"
 packageTxtSuffix :: String
 packageTxtSuffix = ".txt"
 
-findPkgModule :: Flags -> IdentModule -> StateIO Cache (TModule [LDef], Symbols, Time)
+findPkgModule :: Flags -> IdentModule -> StateIO Cache (TModule [LDef], Symbols, Time, [TypeExport])
 findPkgModule flags mn = do
   let fn = moduleToFile mn ++ packageTxtSuffix
   mres <- liftIO $ openFilePath (pkgPath flags) fn
@@ -346,7 +368,7 @@ findPkgModule flags mn = do
       cash <- get
       case lookupCache mn cash of
         Nothing -> error $ "package does not contain module " ++ pkg ++ " " ++ showIdent mn
-        Just t -> return (t, noSymbols, 0)
+        Just t -> return (t, noSymbols, 0, [])
     Nothing ->
       errorMessage (getSLoc mn) $
         "Module not found: " ++ show mn ++

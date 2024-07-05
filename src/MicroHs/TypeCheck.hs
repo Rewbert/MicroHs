@@ -4,7 +4,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 module MicroHs.TypeCheck(
   typeCheck,
-  TModule(..), showTModule, tModuleName,
+  TModule(..), showTModule, tModuleName, tTypeExports,
+  FixDef, SynDef, ClsDef,
   impossible, impossibleShow,
   mkClassConstructor,
   mkSuperSel,
@@ -129,6 +130,9 @@ data TModule a = TModule
 tModuleName :: forall a . TModule a -> IdentModule
 tModuleName (TModule a _ _ _ _ _ _ _) = a
 
+tTypeExports :: forall a . TModule a -> [TypeExport]
+tTypeExports (TModule _ _ ts _ _ _ _ _) = ts
+
 bindingsOf :: forall a . TModule a -> a
 bindingsOf (TModule _ _ _ _ _ _ _ a) = a
 
@@ -139,14 +143,14 @@ data TypeExport = TypeExport
   Ident           -- unqualified name
   Entry           -- symbol table entry
   [ValueExport]   -- associated values, i.e., constructors, selectors, methods
---  deriving (Show)
+  deriving (Show)
 
 --instance Show TypeExport where show (TypeExport i _ vs) = showIdent i ++ show vs
 
 data ValueExport = ValueExport
   Ident           -- unqualified name
   Entry           -- symbol table entry
---  deriving (Show)
+  deriving (Show)
 
 --instance Show ValueExport where show (ValueExport i _) = showIdent i
 

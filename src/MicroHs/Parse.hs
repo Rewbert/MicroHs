@@ -1,7 +1,7 @@
 -- Copyright 2023 Lennart Augustsson
 -- See LICENSE file for full license.
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns -Wno-unused-do-bind #-}
-module MicroHs.Parse(P, pTop, pTopModule, parseDie, parse, pExprTop, keywords) where
+module MicroHs.Parse(P, pTop, pTopModule, parseDie, parseDieIncompleteModule, parse, pExprTop, pType, pExpr, keywords) where
 import Prelude
 import Control.Applicative
 import Control.Monad
@@ -12,7 +12,7 @@ import MicroHs.Lex
 import MicroHs.Expr hiding (getSLoc)
 import qualified MicroHs.Expr as E
 import MicroHs.Ident
---import Debug.Trace
+import Debug.Trace
 
 type P a = Prsr LexState Token a
 
@@ -23,10 +23,27 @@ parseDie p fn file =
     Left msg -> error msg
     Right a -> a
 
+parseDieIncompleteModule :: forall a . (Show a) =>
+            P a -> FilePath -> String -> a
+parseDieIncompleteModule p fn file =
+  case parseIncompleteModule p fn file of
+    Left msg -> error msg
+    Right a -> a
+
 parse :: forall a . (Show a) =>
          P a -> FilePath -> String -> Either String a
 parse p fn file =
   let { ts = lexTopLS fn file } in
+  case runPrsr p ts of
+    Left lf -> Left $ formatFailed lf
+    Right [a] -> Right a
+    Right as -> Left $ "Ambiguous:"
+                       ++ unlines (map show  as)
+
+parseIncompleteModule :: forall a . (Show a) =>
+         P a -> FilePath -> String -> Either String a
+parseIncompleteModule p fn file =
+  let { ts = lexId fn file } in -- difference is here, lexId instead of lexTopLS
   case runPrsr p ts of
     Left lf -> Left $ formatFailed lf
     Right [a] -> Right a

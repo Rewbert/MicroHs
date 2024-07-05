@@ -32,6 +32,9 @@ import System.IO.TimeMilli
 import Compat
 import MicroHs.Instances(getMhsDir) -- for GHC
 import MicroHs.TargetConfig
+import MicroHs.Interface
+import MicroHs.Expr (Assoc(..), Expr(..))
+import MicroHs.Parse
 
 mhsVersion :: String
 mhsVersion = "0.9.11.0"
@@ -170,18 +173,41 @@ mainListPkg _flags pkgfn = do
 
 mainCompile :: Flags -> Ident -> IO ()
 mainCompile flags mn = do
-  (rmn, allDefs) <- do
+  putStrLn $ show mn
+  ((rmn, allDefs), te) <- do
     cash <- getCached flags
-    (rds, _, cash') <- compileCacheTop flags mn cash
+    (rds, _, cash', te) <- compileCacheTop flags mn cash
     maybeSaveCache flags cash'
-    return rds
+    return (rds, te)
 
   t1 <- getTimeMilli
   let
     mainName = qualIdent rmn (mkIdent "main")
     cmdl = (mainName, allDefs)
-    outData = toStringCMdl cmdl
+    (outData,idmap) = toStringCMdl cmdl
+    (f,m) = toCombinatorFile allDefs []
+
+--    toCombinatorFile :: [LDef] -> [(Ident, Int)] -> (String, [(Ident, Int)])
+
+-- -- type ClassInfo = ([IdKind], [EConstraint], EType, [Ident], [IFunDep])  -- class tyvars, superclasses, class kind, methods, fundeps
+-- -- type IFunDep = ([Bool], [Bool])           -- the length of the lists is the number of type variables
+
     numDefs = length allDefs
+    ifc = mkInterface mn (length idmap) mhsVersion combVersion [] idmap (foldl max 0 $ map snd idmap) [ (mkIdent "a", (AssocLeft, 0))
+                                                                                                      , (mkIdent "b", (AssocRight, 1))
+                                                                                                      , (mkIdent "c", (AssocNone, 2))]
+                                                                                                      te
+                                                                                                      []
+                                                                                                      [(mkIdent "Show", ( []
+                                                                                                                        , []
+                                                                                                                        , EVar (mkIdent "Int")
+                                                                                                                        , []
+                                                                                                                        , [([True, True], [False])]))]
+  -- putStrLn "***** f *****"
+  -- putStrLn f
+  -- putStrLn "*************"
+  putStrLn $ show ifc
+  putStrLn $ show $ parseInterface (show ifc)
   when (verbosityGT flags 0) $
     putStrLn $ "top level defns: " ++ show numDefs
   when (verbosityGT flags 2) $

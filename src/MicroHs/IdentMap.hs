@@ -28,6 +28,7 @@ data Map a
     a              -- element stored in the node
     (Map a)        -- right subtree
 --  deriving(Show)
+  deriving Show
 
 {-
 instance Show a => Show (Map a) where

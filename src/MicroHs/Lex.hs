@@ -2,13 +2,14 @@ module MicroHs.Lex(
   Token(..), showToken,
   tokensLoc,
   LexState, lexTopLS,
-  popLayout, lex
+  popLayout, lex, lexId
   ) where
 import Prelude hiding(lex)
 import Data.Char
 import Data.List
 import MicroHs.Ident
 import Text.ParserComb(TokenMachine(..))
+import Debug.Trace
 
 data Token
   = TIdent  SLoc [String] String  -- identifier
@@ -336,6 +337,11 @@ lexStart ts =
 
 lexTopLS :: FilePath -> String -> LexState
 lexTopLS f s = LS $ layoutLS (lexStart $ lex (SLoc f 1 1) s) []
+
+-- | Same as lexTopLS, but without calling lexStart. This is meant to be used for parsing
+-- incomplete modules, e.g. just a type, for instance.
+lexId :: FilePath -> String -> LexState
+lexId f s = LS $ layoutLS (lex (SLoc f 1 1) s) []
 
 -----------
 

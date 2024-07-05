@@ -63,6 +63,7 @@ executable mhs
                        MicroHs.IntSet
                        MicroHs.Instances
                        MicroHs.Interactive
+                       MicroHs.Interface
                        MicroHs.Lex
                        MicroHs.List
                        MicroHs.MakeCArray
