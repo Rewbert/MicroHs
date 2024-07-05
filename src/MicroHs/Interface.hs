@@ -8,6 +8,7 @@ import MicroHs.SymTab (Entry(..))
 import MicroHs.Parse (parseDieIncompleteModule, pType, pExpr)
 import MicroHs.TypeCheck
 import MicroHs.TCMonad
+import qualified MicroHs.IdentMap as M
 
 import Text.SerokellParser
 import Debug.Trace
@@ -39,7 +40,9 @@ data Interface = Interface
     -- | Synonym definitions
     synonymDefs :: [SynDef],
     -- | Class definitions
-    classDefs :: [ClsDef]
+    classDefs :: [ClsDef],
+    -- | Instance definitions
+    instDefs :: [InstDef]
   }
 
 -- | This character separates symbol declarations in rendered interfaces
@@ -72,7 +75,48 @@ instance Show Interface where
       [ show $ length (classDefs if')] ++
       (if length (classDefs if') == 0
         then ["<noclassdefs>"]
-        else map renderClassDef (classDefs if'))
+        else map renderClassDef (classDefs if')) ++
+      [ show $ length (instDefs if')] ++
+      (if length (instDefs if') == 0
+        then ["<noinstdefs>"]
+        else map renderInstDef (instDefs if'))
+
+renderInstDef :: InstDef -> String
+renderInstDef (i, instinfo) = unlines $
+  [ show i
+  , renderInstInfo instinfo
+  ]
+
+renderInstInfo :: InstInfo -> String
+renderInstInfo (InstInfo m dicts fundeps) = unlines $
+  [ renderExprMap m
+  , show $ length dicts ] ++
+  (if length dicts == 0
+    then []
+    else map renderInstDict dicts) ++
+  [ show $ length fundeps ] ++
+  (if length fundeps == 0
+    then []
+    else map renderFunDeps fundeps)
+
+renderInstDict :: InstDict -> String
+renderInstDict (e, context, types) = unlines $
+  [ show e
+  , show $ length context ] ++
+  (if length context == 0
+    then []
+    else map show context) ++
+  [ show $ length types ] ++
+  (if length types == 0
+    then []
+    else map show types)
+
+renderExprMap :: M.Map Expr -> String
+renderExprMap m = let pairs = M.toList m in unlines $
+  [ show $ length pairs ] ++
+  (if length pairs == 0
+    then []
+    else map (\(i,e) -> concat [show e, [symbolSeparator], show e]) pairs)
 
 renderClassDef :: ClsDef -> String
 renderClassDef (className, classInfo) = init $ unlines $ [ show className, renderClassInfo classInfo]
@@ -113,9 +157,6 @@ renderFunDeps (xs, ys) = init $ unlines $
       else init $ unlines $ map show ys
   ]
 
--- type ClassInfo = ([IdKind], [EConstraint], EType, [Ident], [IFunDep])  -- class tyvars, superclasses, class kind, methods, fundeps
--- type IFunDep = ([Bool], [Bool])           -- the length of the lists is the number of type variables
-
 renderFixity :: (Ident, (Assoc, Int)) -> String
 renderFixity (i, (a, n)) = concat [show i, [symbolSeparator], [showAssoc a], [symbolSeparator], show n]
   where
@@ -143,15 +184,26 @@ sepEntryRight = "e>"
 -- bind anything. I represent such a forall with a {. I match on
 -- Forall [] t and
 -- Forall [] (Forall [] t,
--- and assume that I won't see
--- Forall t (Forall [] t).
+-- And I use } to represent the case where we have Forall nonempty (Forall [] t)
 renderEntry :: Entry -> String
 renderEntry (Entry e (EForall [] (EForall [] t))) = concat [sepEntryLeft, show e, "{{", show t, sepEntryRight]
 renderEntry (Entry e (EForall [] t)) = concat [sepEntryLeft, show e, "{", show t, sepEntryRight]
 renderEntry (Entry e (EForall ks (EForall [] t))) = concat [sepEntryLeft, show e, [symbolSeparator], "}", show (EForall ks t), sepEntryRight]
 renderEntry (Entry e t) = concat [sepEntryLeft, show e, [symbolSeparator], show t, sepEntryRight]
 
-mkInterface :: Ident -> Int -> String -> String -> [Ident] -> [(Ident, Int)] -> Int -> [(Ident, (Assoc, Int))] -> [TypeExport] -> [SynDef] -> [ClsDef] -> Interface
+mkInterface :: Ident
+            -> Int
+            -> String
+            -> String
+            -> [Ident]
+            -> [(Ident, Int)]
+            -> Int
+            -> [FixDef]
+            -> [TypeExport]
+            -> [SynDef]
+            -> [ClsDef]
+            -> [InstDef]
+            -> Interface
 mkInterface = Interface
 
 -- * Parser
@@ -188,10 +240,15 @@ pInterface = do
   numClsDef <- int
   newline
   classDefs <- pClsDef numClsDef
-  return $ mkInterface mn numsymbols mhsV combV depsOn syms maxlabel fixs texps syndefs classDefs
+  return $ mkInterface mn numsymbols mhsV combV depsOn syms maxlabel fixs texps syndefs classDefs []
+
+pInstDef :: Int -> Parser Char e [InstDef]
+pInstDef 0 = string "<noinstdefs>\n" >> return []
+pInstDef n = count n $ do
+  undefined
 
 pClsDef :: Eq e => Int -> Parser Char e [ClsDef]
-pClsDef 0 = string "<noclassdefs>" >> return []
+pClsDef 0 = string "<noclassdefs>\n" >> return []
 pClsDef n = count n $ do
   i <- mkIdent <$> line
   ci <- pClassInfo
@@ -260,7 +317,7 @@ pFixities n = count n $ do
   return (name, (assoc, n))
 
 pSynonymDefs :: Int -> Parser Char e [SynDef]
-pSynonymDefs 0 = string "<nosynonymdefs>" >> return []
+pSynonymDefs 0 = string "<nosynonymdefs>\n" >> return []
 pSynonymDefs n = count n $ do
   name <- mkIdent <$> someTill always (char symbolSeparator)
   tstr <- line
@@ -268,7 +325,7 @@ pSynonymDefs n = count n $ do
   return (name, t)
 
 pTypeExports :: Int -> Parser Char e [TypeExport]
-pTypeExports 0 = string "<notypeexports>" >> return []
+pTypeExports 0 = string "<notypeexports>\n" >> return []
 pTypeExports numTypeExports = count numTypeExports $ do
   name <- mkIdent <$> someTill always (char symbolSeparator)
   entry <- pEntry

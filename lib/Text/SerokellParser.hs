@@ -24,7 +24,7 @@ import Data.List (nub)
 
 data Error i e
   = EndOfInput  -- Expected more input, but there is nothing
-  | Unexpected i  -- We didn't expect to find this element
+  | Unexpected i [i] -- We didn't expect to find this element
   | CustomError e  -- Extra errors the user may want to create
   | Empty  -- Used in `Alternative` implementation of `empty`
   deriving (Eq, Show)
@@ -75,7 +75,7 @@ satisfy predicate = Parser $ \input ->
     [] -> Left [EndOfInput]
     hd : rest
       | predicate hd -> Right (hd, rest)
-      | otherwise    -> Left [Unexpected hd]
+      | otherwise    -> Left [Unexpected hd rest]
 
 -- | Always parse a single token
 always :: Parser i e i

@@ -5,7 +5,7 @@
 module MicroHs.TypeCheck(
   typeCheck,
   TModule(..), showTModule, tModuleName, tTypeExports,
-  FixDef, SynDef, ClsDef,
+  FixDef, SynDef, ClsDef, InstDef,
   impossible, impossibleShow,
   mkClassConstructor,
   mkSuperSel,
