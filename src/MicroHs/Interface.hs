@@ -42,7 +42,9 @@ data Interface = Interface
     -- | Class definitions
     classDefs :: [ClsDef],
     -- | Instance definitions
-    instDefs :: [InstDef]
+    instDefs :: [InstDef],
+    -- | Exported values
+    valueExports :: [ValueExport]
   }
 
 -- | This character separates symbol declarations in rendered interfaces
@@ -79,7 +81,11 @@ instance Show Interface where
       [ show $ length (instDefs if')] ++
       (if length (instDefs if') == 0
         then ["<noinstdefs>"]
-        else map renderInstDef (instDefs if'))
+        else map renderInstDef (instDefs if')) ++
+      [ show $ length (valueExports if')] ++
+      (if length (valueExports if') == 0
+        then ["<novalueexports>"]
+        else map renderValueExport (valueExports if'))
 
 renderInstDef :: InstDef -> String
 renderInstDef (i, instinfo) = unlines $
@@ -203,6 +209,7 @@ mkInterface :: Ident
             -> [SynDef]
             -> [ClsDef]
             -> [InstDef]
+            -> [ValueExport]
             -> Interface
 mkInterface = Interface
 
@@ -240,7 +247,13 @@ pInterface = do
   numClsDef <- int
   newline
   classDefs <- pClsDef numClsDef
-  return $ mkInterface mn numsymbols mhsV combV depsOn syms maxlabel fixs texps syndefs classDefs []
+  numInstDefs <- int
+  newline
+  instDefs <- pInstDef numInstDefs
+  numValueExports <- int
+  newline
+  valueExports <- pValueExports numValueExports
+  return $ mkInterface mn numsymbols mhsV combV depsOn syms maxlabel fixs texps syndefs classDefs instDefs valueExports
 
 pInstDef :: Eq e => Int -> Parser Char e [InstDef]
 pInstDef 0 = string "<noinstdefs>\n" >> return []
