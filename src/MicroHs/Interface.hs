@@ -5,7 +5,7 @@ import MicroHs.Ident
 import MicroHs.Expr (Assoc(..), Expr(..), EType, IdKind(..))
 import MicroHs.TypeCheck
 import MicroHs.SymTab (Entry(..))
-import MicroHs.Parse (parseDieIncompleteModule, pType, pExpr)
+import MicroHs.Parse (parseDieIncompleteModule, pType, pExpr, parseDie)
 import MicroHs.TypeCheck
 import MicroHs.TCMonad
 import qualified MicroHs.IdentMap as M
@@ -116,7 +116,7 @@ renderExprMap m = let pairs = M.toList m in unlines $
   [ show $ length pairs ] ++
   (if length pairs == 0
     then []
-    else map (\(i,e) -> concat [show e, [symbolSeparator], show e]) pairs)
+    else map (\(i,e) -> concat [show i, [symbolSeparator], show e]) pairs)
 
 renderClassDef :: ClsDef -> String
 renderClassDef (className, classInfo) = init $ unlines $ [ show className, renderClassInfo classInfo]
@@ -242,10 +242,45 @@ pInterface = do
   classDefs <- pClsDef numClsDef
   return $ mkInterface mn numsymbols mhsV combV depsOn syms maxlabel fixs texps syndefs classDefs []
 
-pInstDef :: Int -> Parser Char e [InstDef]
+pInstDef :: Eq e => Int -> Parser Char e [InstDef]
 pInstDef 0 = string "<noinstdefs>\n" >> return []
 pInstDef n = count n $ do
-  undefined
+  i <- mkIdent <$> line
+  instInfo <- pInstInfo
+  return (i, instInfo)
+
+pInstInfo :: Eq e => Parser Char e InstInfo
+pInstInfo = do
+  m <- pExprMap
+  numInstDicts <- int
+  newline
+  instdicts <- count numInstDicts pInstDict
+  numFunDeps <- int
+  newline
+  fundeps <- count numFunDeps pFunDep
+  return (InstInfo m instdicts fundeps)
+
+pInstDict :: Parser Char e InstDict
+pInstDict = do
+  e <- (parseDieIncompleteModule pExpr "interface-parser") <$> line
+  numContexts <- int
+  newline
+  context <- count numContexts $ (parseType <$> line)
+  numTypes <- int
+  newline
+  types <- count numTypes (parseType <$> line)
+  return (e, context, types)
+
+pExprMap :: Parser Char e (M.Map Expr)
+pExprMap = do
+  n <- int
+  newline
+  pairs <- count n $ do
+    i <- mkIdent <$> someTill always (char symbolSeparator)
+    estr <- someTill always (char symbolSeparator)
+    let e = parseDieIncompleteModule pExpr "interface-parser" estr
+    return (i,e)
+  return $ M.fromList pairs
 
 pClsDef :: Eq e => Int -> Parser Char e [ClsDef]
 pClsDef 0 = string "<noclassdefs>\n" >> return []
@@ -279,24 +314,27 @@ pClassInfo = do
 
   numfndps <- int
   newline
-  fndps <- count numfndps $ do
-    numxs <- int
-    newline
-    xs <- count numxs $ do
-      b <- pBool
-      newline
-      return b
-    
-    numys <- int
-    newline
-    ys <- count numys $ do
-      b <- pBool
-      newline
-      return b
-    
-    return (xs, ys)
-  
+  fndps <- count numfndps pFunDep
+
   return (tvars, sprclss, knd, mthds, fndps)
+
+pFunDep :: Eq e => Parser Char e IFunDep
+pFunDep = do
+  numxs <- int
+  newline
+  xs <- count numxs $ do
+    b <- pBool
+    newline
+    return b
+  
+  numys <- int
+  newline
+  ys <- count numys $ do
+    b <- pBool
+    newline
+    return b
+  
+  return (xs, ys)
 
 parseType :: String -> Expr -- synonym for EType, EConstraint, etc
 parseType tstr = parseDieIncompleteModule pType "interface-parser-type" tstr
