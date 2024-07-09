@@ -163,6 +163,10 @@ compileModule flags impt mn pathfn file = do
   t3 <- liftIO getTimeMilli
   let
     (tmdl, syms) = typeCheck impt (zip specs impMdls) mdl
+  -- replace the test with just True, or remove the if all together and just keep the print, and it will crash
+  if tModuleName tmdl /= mkIdent "Data.Typeable"
+    then liftIO $ putStrLn $ show $ tTypeExports tmdl
+    else return ()
   when (verbosityGT flags 3) $
     liftIO $ putStrLn $ "type checked:\n" ++ showTModule showEDefs tmdl ++ "-----\n"
   let
