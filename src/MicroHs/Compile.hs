@@ -175,7 +175,7 @@ compileModule flags impt mn pathfn file = do
     parsd = parseInterface (show intf)
   liftIO $ putStrLn $ show intf
   liftIO $ putStrLn $ show parsd
-  error "do not go further"
+--  error "do not go further"
   liftIO $ putStrLn $ "now I typechecked module: " ++ show (tModuleName tmdl)
   when (verbosityGT flags 3) $
     liftIO $ putStrLn $ "type checked:\n" ++ showTModule showEDefs tmdl ++ "-----\n"

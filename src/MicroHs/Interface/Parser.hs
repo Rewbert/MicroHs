@@ -181,7 +181,7 @@ pFunDep = do
   return (xs, ys)
 
 parseType :: String -> Expr -- synonym for EType, EConstraint, etc
-parseType tstr = parseDieIncompleteModule pType "interface-parser-type" tstr
+parseType tstr = parseDieIncompleteModule pType "interface-parser-type-here3" tstr
 
 pFixities :: Int -> Parser Char e [FixDef]
 pFixities n = count n $ do
@@ -202,7 +202,7 @@ pSynonymDefs :: Int -> Parser Char e [SynDef]
 pSynonymDefs n = count n $ do
   name <- mkIdent <$> someTill always (char symbolSeparator)
   tstr <- line
-  let t = parseDieIncompleteModule pType "interface-parser-type" tstr
+  let t = pTypeExportType tstr -- parseDieIncompleteModule pType ("interface-parser-type-here4: " ++ tstr) tstr
   return (name, t)
 
 pTypeExports :: Int -> Parser Char e [TypeExport]
@@ -216,10 +216,17 @@ pTypeExports numTypeExports = count numTypeExports $ do
 
     exports <- count numValueExports $ do
         n <- mkIdent <$> line
-        e <- pECon
-        t <- pTypeExportType <$> line
-        return (ValueExport n (Entry e t))
-    
+        kind <- line
+        case kind of
+            "con" -> do
+                e <- pECon
+                t <- pTypeExportType <$> line
+                return (ValueExport n (Entry e t))
+            "var" -> do
+                e <- (EVar . mkIdent) <$> line
+                t <- pTypeExportType <$> line
+                return (ValueExport n (Entry e t))
+
     return (TypeExport name entry exports)
 
 pTypeExportType :: String -> EType
@@ -257,7 +264,7 @@ pEntry = do
     parseExpr str = parseDieIncompleteModule pExpr "interface-parser-expr-416" str
 
     parseEntry :: String -> EType
-    parseEntry str = parseDieIncompleteModule pType "interface-parser-type" str
+    parseEntry str = parseDieIncompleteModule pType "interface-parser-type-here" str
 
 pEntryType :: Parser Char e EType
 pEntryType = do
@@ -271,7 +278,7 @@ pEntryType = do
   return t
   where
     parseEntryType :: String -> EType
-    parseEntryType str = parseDieIncompleteModule pType "interface-parser-type" str
+    parseEntryType str = parseDieIncompleteModule pType "interface-parser-type-here2" str
 
 pSymbols :: Int -> Parser Char e [(Ident, Int)]
 pSymbols numSymbols =

@@ -79,7 +79,7 @@ instance Show Interface where
       [ show $ length (typeExports if')] ++
       map renderTypeExport (typeExports if') ++
       [ show $ length (synonymDefs if')] ++
-      map (\(i,t) -> concat [show i, [symbolSeparator], show t]) (synonymDefs if') ++
+      map (\(i,t) -> concat [show i, [symbolSeparator], renderForalls t]) (synonymDefs if') ++
       [ show $ length (classDefs if')] ++
       map renderClassDef (classDefs if') ++
       [ show $ length (instDefs if')] ++
@@ -206,8 +206,9 @@ renderTypeExport (TypeExport name entry valueexports) = unlines' $
 
 renderECon :: Expr -> String
 renderECon e = case e of
-    ECon con -> renderCon con
-    _ -> error $ "not an ECon: " ++ show e
+    ECon con -> "con\n" ++ renderCon con
+    EVar _ -> "var\n" ++ show e -- error $ "not an ECon: " ++ show e
+    _ -> error $ "not ECon or EVar: " ++ show e
   where
     renderCon :: Con -> String
     renderCon (ConNew nm flds) = unlines' $
