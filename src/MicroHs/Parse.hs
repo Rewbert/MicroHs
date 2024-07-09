@@ -478,16 +478,18 @@ pForall = (forallKW *> esome pIdKind <* pSymbol ".") <|< pure []
 pTypeOp :: P EType
 pTypeOp = pOperators pTypeOper pTypeArg
 
+-- | Type level operators (operator, right-arrow, or double-right-arrow)
 pTypeOper :: P Ident
 pTypeOper = pOper <|< (mkIdent "->" <$ pSRArrow) <|< (mkIdent "=>" <$ pDRArrow)
 
+-- | Arguments to type operators
 pTypeArg :: P EType
 pTypeArg = pTypeApp
 
 pTypeApp :: P EType
 pTypeApp = do
-  f <- pAType
-  as <- emany pAType
+  f <- pAType -- a single type (type constructor)
+  as <- emany pAType -- zero or more types (type arguments)
   mt <- eoptional (pSymbol "::" *> pType)
   let
     r = foldl EApp f as
@@ -495,10 +497,10 @@ pTypeApp = do
 
 pAType :: P Expr
 pAType =
-      (EVar <$> pLQIdentSym)
-  <|< (EVar <$> pUQIdentSym)
-  <|< pLit
-  <|< (eTuple <$> (pSpec '(' *> esepBy1 pType (pSpec ',') <* pSpec ')'))
+      (EVar <$> pLQIdentSym) -- lower-case symbol
+  <|< (EVar <$> pUQIdentSym) -- upper-case symbol
+  <|< pLit                   -- type literal
+  <|< (eTuple <$> (pSpec '(' *> esepBy1 pType (pSpec ',') <* pSpec ')')) -- type-level tuples
   <|< (EListish . LList . (:[]) <$> (pSpec '[' *> pType <* pSpec ']'))  -- Unlike expressions, only allow a single element.
 
 -------------

@@ -6,6 +6,7 @@ module Text.SerokellParser (
     , always
     , optional
     , alt
+    , remainder
     , many
     , some
     , sepBy
@@ -99,6 +100,9 @@ alt (Parser l) (Parser r) = Parser $ \input ->
         Left e -> case r input of
             Right res -> Right res
             Left e1 -> Left $ nub $ e <> e1
+
+remainder :: Parser i e [i]
+remainder = Parser $ \input -> Right (input, input)
 
 -- * Derives combinators
 

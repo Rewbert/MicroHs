@@ -171,7 +171,10 @@ compileModule flags impt mn pathfn file = do
   let
     -- now that all dependencies are taken care of, we typecheck this module
     (tmdl, syms) = typeCheck impt (zip specs impMdls) mdl
---  liftIO $ putStrLn $ show $ tTypeExports tmdl
+    intf = mkInterfaceFromTModule tmdl
+    parsd = parseInterface (show intf)
+  liftIO $ putStrLn $ show intf
+  liftIO $ putStrLn $ show parsd
   liftIO $ putStrLn $ "now I typechecked module: " ++ show (tModuleName tmdl)
   when (verbosityGT flags 3) $
     liftIO $ putStrLn $ "type checked:\n" ++ showTModule showEDefs tmdl ++ "-----\n"

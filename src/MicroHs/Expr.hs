@@ -701,7 +701,7 @@ ppExprR raw = ppE
         ELazy False p -> text "!" <> ppE p
         EUVar i -> text ("_a" ++ show i)
         ECon c -> ppCon c
-        EForall iks e -> ppForall iks <+> ppEType e
+        EForall iks e -> text "(" <+> ppForall iks <+> ppEType e <+> text ")"
 
     ppApp :: [Expr] -> Expr -> Doc
     ppApp as (EApp f a) = ppApp (a:as) f
