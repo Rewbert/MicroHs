@@ -64,6 +64,8 @@ executable mhs
                        MicroHs.Instances
                        MicroHs.Interactive
                        MicroHs.Interface
+                       MicroHs.Interface.Internal
+                       MicroHs.Interface.Parser
                        MicroHs.Lex
                        MicroHs.List
                        MicroHs.MakeCArray
