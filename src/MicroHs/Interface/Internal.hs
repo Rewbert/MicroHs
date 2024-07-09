@@ -1,10 +1,10 @@
-module MicroHs.Interface.Internal (Interface(..), mkInterface, symbolSeparator, sepEntryLeft, sepEntryRight) where
+module MicroHs.Interface.Internal (Interface(..), mkInterface, mkInterfaceFromTModule, symbolSeparator, sepEntryLeft, sepEntryRight) where
 
 import MicroHs.Ident
 import MicroHs.TypeCheck
 import MicroHs.TCMonad
 import qualified MicroHs.IdentMap as M
-import MicroHs.Expr (Assoc(..), Expr(..), EType, IdKind(..), Con(..))
+import MicroHs.Expr (Assoc(..), Expr(..), EType, IdKind(..), Con(..), ConTyInfo(..))
 import MicroHs.SymTab (Entry(..))
 
 data Interface = Interface
@@ -54,6 +54,10 @@ mkInterface :: Ident
             -> [ValueExport]
             -> Interface
 mkInterface = Interface
+
+mkInterfaceFromTModule :: TModule a -> Interface
+mkInterfaceFromTModule (TModule mn fixdefs typeexports syndefs clsdefs instdefs valueexports _) =
+  Interface mn 0 "0.0.0.0" "v7.0\n" [] [] 0 fixdefs typeexports syndefs clsdefs instdefs valueexports
 
 -- | This character separates symbol declarations in rendered interfaces
 symbolSeparator :: Char
@@ -166,14 +170,6 @@ renderFixity (i, (a, n)) = concat [show i, [symbolSeparator], [showAssoc a], [sy
     showAssoc AssocRight = 'r'
     showAssoc AssocNone = 'n'
 
--- | TODO FIXME add special case here for constructors (I think they all should be constructors)
-renderTypeExport :: TypeExport -> String
-renderTypeExport (TypeExport name entry valueexports) = init $ unlines $
-  [ concat [show name, [symbolSeparator], renderEntry entry]
-  , show (length valueexports)
-  ] ++
-  map renderValueExport valueexports
-
 renderValueExport :: ValueExport -> String
 renderValueExport (ValueExport n entry) = concat [show n, [symbolSeparator], renderEntry entry]
 
@@ -193,3 +189,49 @@ renderEntry (Entry e (EForall [] (EForall [] t))) = concat [sepEntryLeft, show e
 renderEntry (Entry e (EForall [] t)) = concat [sepEntryLeft, show e, [symbolSeparator], "{", show t, sepEntryRight]
 renderEntry (Entry e (EForall ks (EForall [] t))) = concat [sepEntryLeft, show e, [symbolSeparator], "}", show (EForall ks t), sepEntryRight]
 renderEntry (Entry e t) = concat [sepEntryLeft, show e, [symbolSeparator], show t, sepEntryRight]
+
+renderForalls :: EType -> String
+renderForalls (EForall [] (EForall [] t)) = concat [ "{{", show t]
+renderForalls (EForall [] t)              = concat [ "{", show t]
+renderForalls (EForall ks (EForall [] t)) = concat ["}", show (EForall ks t)]
+renderForalls t                           = show t
+
+-- * Type export
+
+renderTypeExport :: TypeExport -> String
+renderTypeExport (TypeExport name entry valueexports) = unlines' $
+  [ concat [show name, [symbolSeparator], renderEntry entry] 
+  , show (length valueexports) ] ++
+  map (\(ValueExport n (Entry e t)) -> unlines' [ show n, renderECon e, renderForalls t] ) valueexports
+
+renderECon :: Expr -> String
+renderECon e = case e of
+    ECon con -> renderCon con
+    _ -> error $ "not an ECon: " ++ show e
+  where
+    renderCon :: Con -> String
+    renderCon (ConNew nm flds) = unlines' $
+      [ connewTag
+      , show nm
+      , show $ length flds
+      ] ++ map show flds
+    renderCon (ConData cinfo nm flds) = unlines' $
+      [ condataTag
+      , show nm
+      , show $ length flds
+      ] ++ map show flds ++
+      [ renderConTyInfo cinfo ]
+
+    condataTag :: String
+    condataTag = "0"
+
+    connewTag :: String
+    connewTag = "1"
+
+    renderConTyInfo :: ConTyInfo -> String
+    renderConTyInfo c = unlines' $
+      [ show $ length c ] ++
+      map (\(n,i) -> concat [show n, [symbolSeparator], show i]) c
+
+unlines' :: [String] -> String
+unlines' = init . unlines

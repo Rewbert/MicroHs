@@ -174,8 +174,8 @@ mainListPkg _flags pkgfn = do
 
 mainCompile :: Flags -> Ident -> IO ()
 mainCompile flags mn = do
---  let r = parseDieIncompleteModule pExpr "interface-parser" "Data.List_Type.:"
---  putStrLn $ show r
+  -- let r = parseDieIncompleteModule pType "interface-parser" "forall . ( forall . Bool )"
+  -- putStrLn $ show r
   ((rmn, allDefs), te) <- do
     cash <- getCached flags
     (rds, _, cash', te) <- compileCacheTop flags mn cash

@@ -11,7 +11,7 @@ import qualified MicroHs.IdentMap as M
 import MicroHs.Interface.Internal
 
 import Text.SerokellParser
-
+import Debug.Trace
 
 parseInterface :: String -> Interface
 parseInterface str = case runParser pInterface str of
@@ -64,6 +64,29 @@ pInterface = do
 --  traceM $ "parsed num value exports: " ++ show numValueExports
   valueExports <- pValueExports numValueExports
   return $ mkInterface mn numsymbols mhsV combV depsOn syms maxlabel fixs texps syndefs classDefs instDefs valueExports
+
+pECon :: Parser Char e Expr
+pECon = do
+    tag <- int
+    newline
+
+    nm <- mkIdent <$> line
+
+    numFlds <- int
+    newline
+    flds <- count numFlds $ (mkIdent <$> line)
+
+    case tag of
+        0 -> do numctinfo <- int
+                newline
+                c <- count numctinfo $ do
+                    n <- mkIdent <$> someTill always (char symbolSeparator)
+                    i <- int
+                    newline
+                    return (n,i)
+                return (ECon $ ConData c nm flds)
+        1 -> return (ECon $ ConNew nm flds)
+        _ -> error $ "not a valid ECon tag: " ++ show tag
 
 pInstDef :: Eq e => Int -> Parser Char e [InstDef]
 pInstDef n = count n $ do
@@ -184,20 +207,31 @@ pSynonymDefs n = count n $ do
 
 pTypeExports :: Int -> Parser Char e [TypeExport]
 pTypeExports numTypeExports = count numTypeExports $ do
-  name <- mkIdent <$> someTill always (char symbolSeparator)
---  traceM $ "parsed type name: " ++ show name
-  -- entry <- pEntry
-  -- newline
-  entry <- do
-    string sepEntryLeft
-    e <- (\str -> ECon (ConData [] (mkIdent str) [])) <$> someTill always (char symbolSeparator)
-    t <- pEntryType
+    name <- mkIdent <$> someTill always (char symbolSeparator)
+    entry <- pEntry
     newline
-    return $ Entry e t
-  numValueExports <- int
-  newline
-  valueExports <- pValueExports numValueExports
-  return $ TypeExport name entry valueExports
+
+    numValueExports <- int
+    newline
+
+    exports <- count numValueExports $ do
+        n <- mkIdent <$> line
+        e <- pECon
+        t <- pTypeExportType <$> line
+        return (ValueExport n (Entry e t))
+    
+    return (TypeExport name entry exports)
+
+pTypeExportType :: String -> EType
+pTypeExportType str = case str of
+    ('{':'{':t) -> EForall [] $ EForall [] $ parse t
+    ('{':t) -> EForall [] $ parse t
+    ('}':t) -> let EForall ks t' = parse t
+               in EForall ks (EForall [] t')
+    t -> parse t
+  where
+    parse :: String -> EType
+    parse str = parseDieIncompleteModule pType "interface-parser" str
 
 pValueExports :: Int -> Parser Char e [ValueExport]
 pValueExports numValueExports = count numValueExports $ do
