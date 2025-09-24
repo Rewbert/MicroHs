@@ -1,7 +1,7 @@
 module Foreign.Marshal.Alloc(
   malloc, calloc, realloc, alloca,
   free, finalizerFree,
-  mallocBytes, callocBytes, reallocBytes, allocaBytes,
+  mallocBytes, callocBytes, reallocBytes, allocaBytes, callocaBytes,
   ) where
 import qualified Prelude()              -- do not import Prelude
 import Primitives
@@ -51,6 +51,13 @@ alloca = allocaBytes (sizeOf (undefined :: a))
 allocaBytes :: forall a b . Int -> (Ptr a -> IO b) -> IO b
 allocaBytes len io =
   mallocBytes len `primBind` (\ p ->
+  io p `primBind` (\ b ->
+  free p `primThen`
+  primReturn b))
+
+callocaBytes :: forall a b . Int -> (Ptr a -> IO b) -> IO b
+callocaBytes len io =
+  callocBytes len `primBind` (\ p ->
   io p `primBind` (\ b ->
   free p `primThen`
   primReturn b))
