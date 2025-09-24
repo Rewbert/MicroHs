@@ -6621,7 +6621,7 @@ MHS_FROM(mhs_from_CSize, SETINT, size_t);
 #if WANT_TIME
 MHS_FROM(mhs_from_CTime, SETINT, time_t);
 #endif
-// MHS_FROM(mhs_from_CSSize, SETINT, ssize_t);
+MHS_FROM(mhs_from_CSSize, SETINT, ssize_t);
 MHS_FROM(mhs_from_CIntPtr, SETINT, intptr_t);
 MHS_FROM(mhs_from_CUIntPtr, SETINT, uintptr_t);
 from_t
@@ -6663,7 +6663,7 @@ MHS_TO(mhs_to_CSize, evalint, size_t);
 #if WANT_TIME
 MHS_TO(mhs_to_CTime, evalint, time_t);
 #endif
-// MHS_TO(mhs_to_CSSize, evalint, ssize_t);
+MHS_TO(mhs_to_CSSize, evalint, ssize_t);
 MHS_TO(mhs_to_CIntPtr, evalint, intptr_t);
 MHS_TO(mhs_to_CUIntPtr, evalint, uintptr_t);
 
@@ -7008,6 +7008,8 @@ const struct ffi_entry ffi_table[] = {
   { "sqrt", 1, mhs_sqrt},
   { "tan", 1, mhs_tan},
   { "scalbn", 2, mhs_scalbn},
+  { "peek_flt64", 1, mhs_peek_flt64},
+  { "poke_flt64", 2, mhs_poke_flt64},
 #endif  /* WANT_FLOAT64 */
 #if WANT_FLOAT32
   { "acosf", 1, mhs_acosf},
