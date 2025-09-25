@@ -11,13 +11,14 @@ import Foreign.Storable
 import Foreign.Marshal.Alloc
 import Foreign.Marshal.Array
 
-foreign import ccall "sys/socket.h socket"  c_socket  :: CInt -> CInt -> CInt -> IO CInt
-foreign import ccall "sys/socket.h connect" c_connect :: CInt -> Ptr SockAddr -> CInt -> IO CInt
-foreign import ccall "sys/socket.h bind"    c_bind    :: CInt -> Ptr SockAddr -> CInt -> IO CInt
-foreign import ccall "sys/socket.h accept"  c_accept  :: CInt -> Ptr SockAddr -> Ptr CInt -> IO CInt
-foreign import ccall "sys/socket.h listen"  c_listen  :: CInt -> CInt -> IO CInt
-foreign import ccall "sys/socket.h send"    c_send    :: CInt -> Ptr Word8 -> CSize -> CInt -> IO CSSize
-foreign import ccall "sys/socket.h recv"    c_recv    :: CInt -> Ptr Word8 -> CSize -> CInt -> IO CSSize
+foreign import ccall "sys/socket.h socket"  c_socket        :: CInt -> CInt -> CInt -> IO CInt
+foreign import ccall "sys/socket.h connect" c_connect       :: CInt -> Ptr SockAddr -> CInt -> IO CInt
+foreign import ccall "sys/socket.h bind"    c_bind          :: CInt -> Ptr SockAddr -> CInt -> IO CInt
+foreign import ccall "sys/socket.h accept"  c_accept        :: CInt -> Ptr SockAddr -> Ptr CInt -> IO CInt
+foreign import ccall "sys/socket.h listen"  c_listen        :: CInt -> CInt -> IO CInt
+foreign import ccall "sys/socket.h send"    c_send          :: CInt -> Ptr Word8 -> CSize -> CInt -> IO CSSize
+foreign import ccall "sys/socket.h recv"    c_recv          :: CInt -> Ptr Word8 -> CSize -> CInt -> IO CSSize
+foreign import ccall "sys/socket.h setsockopt" c_setsockopt :: CInt -> CInt -> CInt -> Ptr Word8 -> CInt -> IO CInt
 
 foreign import ccall "unistd.h     close"   c_close   :: CInt -> IO CInt
 
@@ -52,6 +53,15 @@ mkSockAddr port Nothing        = SockAddrInet port "0.0.0.0"
 sizeOfSockAddr :: Int
 sizeOfSockAddr = 16 -- 8 bytes of data, and 8 of padding
 
+data SockOpt = SO_REUSEADDR -- and many more
+
+instance Enum SockOpt where
+    toEnum 2 = SO_REUSEADDR
+    toEnum _ = error "idk yet, look it up"
+
+    fromEnum SO_REUSEADDR = 2
+    fromEnum _ = error "idk yet, look it up"
+
 -- | Create a new socket, throwing an exception if creation failed
 socket :: Domain -> StreamType -> IO Socket
 socket d st = do
@@ -59,6 +69,16 @@ socket d st = do
     if i < 0
         then error "error allocating socket"
         else return $ Socket i
+
+setsocketopt :: Socket -> SockOpt -> IO ()
+setsocketopt (Socket socketfd) so = do
+    callocaBytes (sizeOf (undefined :: CInt)) $ \p -> do
+        poke (castPtr p) (1 :: CInt)
+        CInt e <- c_setsockopt socketfd (CInt 1 {- SOL_SOCKET = 1 -}) (CInt $ fromEnum so) p (CInt (sizeOf (undefined :: CInt)))
+        if e == -1
+            then do c <- errno
+                    error $ "error in setsocketopt, errno is " ++ show c
+            else return ()
 
 close :: Socket -> IO ()
 close (Socket fd@(CInt fd')) = do
@@ -76,6 +96,12 @@ connect (Socket socketfd) sockaddr =
             then do c <- errno
                     error $ "error in connect, errno is " ++ show c
             else return ()
+
+connect' :: Socket -> SockAddr -> IO Bool
+connect' (Socket socketfd) sockaddr =
+    withSockAddr sockaddr $ \p -> do
+        CInt e <- c_connect socketfd p (CInt sizeOfSockAddr)
+        return $ e >= 0
 
 bind :: Socket -> SockAddr -> IO ()
 bind (Socket socketfd) sockaddr =
